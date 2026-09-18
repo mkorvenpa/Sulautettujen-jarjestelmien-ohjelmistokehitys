@@ -1,7 +1,7 @@
 /*
-Viikkotehtävä 3. RTOS-ohjelmointi (osa 2)
+Viikkotehtävä 4. RTOS-ohjelman debuggaus
 Tekijä: Maria Korvenpää
-Arvosanatavoite tehtävälle: 1p/4p
+Arvosanatavoite tehtävälle: 1p/5p
 */
 
 
@@ -10,12 +10,16 @@ Arvosanatavoite tehtävälle: 1p/4p
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/timing/timing.h>
 
 /****************************
  * Remember to add line:
  * CONFIG_HEAP_MEM_POOL_SIZE=1024
+ * CONFIG_TIMING_FUNCTIONS=y
  * to prj.conf
  ****************************/
+
+#define DEBUG
 
 // Condition Variables
 K_MUTEX_DEFINE(red_mutex);
@@ -136,6 +140,12 @@ int main(void)
 
 	init_led();
 
+	timing_init();
+
+	while (true) {
+		k_msleep(100);
+	}
+
 	return 0;
 }
 
@@ -200,28 +210,49 @@ void dispatcher_task(void *unused1, void *unused2, void *unused3)
 		memcpy(sequence,rec_item->msg,20);
 		k_free(rec_item);
 
-		printk("Dispatcher: %s\n", sequence);
+		#ifdef DEBUG
+			printk("Dispatcher: %s\n", sequence);
+		#endif
 
 		int cnt = 0;
 
+
+		timing_start();
+		timing_t sequence_start_time = timing_counter_get();
+
 		while (sequence[cnt] != 0) {
+			
+
 			if(sequence[cnt] == 'R') {
-				printk("RED\n");
+				#ifdef DEBUG
+					printk("RED\n");
+				#endif
+				
 				k_condvar_signal(&red_signal);
 			} else if(sequence[cnt] == 'G') {
-				printk("GREEN\n");
+				#ifdef DEBUG
+					printk("GREEN\n");
+				#endif
 				k_condvar_signal(&green_signal);
 			} else if(sequence[cnt] == 'Y') {
-				printk("YELLOW\n");
+				#ifdef DEBUG
+					printk("YELLOW\n");
+				#endif
 				k_condvar_signal(&yellow_signal);
 			} else {
-				printk("Dispatcher: Invalid color %c\n", sequence[cnt]);
+				#ifdef DEBUG
+					printk("Dispatcher: Invalid color %c\n", sequence[cnt]);
+				#endif
 			}
 			cnt++;
 
 			k_condvar_wait(&dispatcher_signal, &dispatcher_mutex, K_FOREVER);
 
 		}
+		timing_t sequence_end_time = timing_counter_get();
+			timing_stop();
+			uint64_t timing_ns = timing_cycles_to_ns(timing_cycles_get(&sequence_start_time, &sequence_end_time));
+			printk("Sequence timer: %lld\n", timing_ns);
         // You need to:
         // Parse color and time from the fifo data
         // Example
@@ -236,6 +267,7 @@ void dispatcher_task(void *unused1, void *unused2, void *unused3)
 // Button interrupt handler
 void button_0_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
+
 	struct data_t *buf = k_malloc(sizeof(struct data_t));
 				if (buf == NULL) {
 					return;
@@ -293,6 +325,7 @@ void button_3_handler(const struct device *dev, struct gpio_callback *cb, uint32
 
 void button_4_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
+
 	struct data_t *buf = k_malloc(sizeof(struct data_t));
 				if (buf == NULL) {
 					return;
@@ -302,7 +335,8 @@ void button_4_handler(const struct device *dev, struct gpio_callback *cb, uint32
 
 				// You need to:
 				// Put dispatcher data to FIFO buffer
-				k_fifo_put(&dispatcher_fifo, buf);
+				k_fifo_put(&dispatcher_fifo, buf);			
+	
 }
 
 
@@ -311,20 +345,34 @@ void red_led_task(void *, void *, void*) {
 	
 	printk("Red led thread started\n");
 	while (true) { 
+		
 		k_condvar_wait(&red_signal, &red_mutex, K_FOREVER);
 
+		timing_start();
+		timing_t red_start_time = timing_counter_get();
+
+
 		gpio_pin_set_dt(&red,1);
-		printk("Red on\n");
+		#ifdef DEBUG
+			printk("Red on\n");
+		#endif
 		// 2. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
 		// 3. set led off
 		gpio_pin_set_dt(&red,0);
-		printk("Red off\n");
+		#ifdef DEBUG
+			printk("Red off\n");
+		#endif
 		// 4. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
 
-		k_condvar_signal(&dispatcher_signal);
 		
+		timing_t red_end_time = timing_counter_get();
+		timing_stop();
+    	uint64_t timing_ns = timing_cycles_to_ns(timing_cycles_get(&red_start_time, &red_end_time));
+		printk("Red task: %lld\n", timing_ns);
+
+		k_condvar_signal(&dispatcher_signal);
 	}
 }
 
@@ -334,18 +382,30 @@ void yellow_led_task(void *, void *, void*) {
 	while (true) {
 		k_condvar_wait(&yellow_signal, &yellow_mutex, K_FOREVER);
 
+		timing_start();
+		timing_t yellow_start_time = timing_counter_get();
+
 		// 1. set led on 
 		gpio_pin_set_dt(&red,1);
 		gpio_pin_set_dt(&green,1);
-		printk("Yellow on\n");
+		#ifdef DEBUG
+			printk("Yellow on\n");
+		#endif
 		// 2. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
 		// 3. set led off
 		gpio_pin_set_dt(&red,0);
 		gpio_pin_set_dt(&green,0);
-		printk("Yellow off\n");
+		#ifdef DEBUG
+			printk("Yellow off\n");
+		#endif
 		// 4. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
+
+		timing_t yellow_end_time = timing_counter_get();
+		timing_stop();
+    	uint64_t timing_ns = timing_cycles_to_ns(timing_cycles_get(&yellow_start_time, &yellow_end_time));
+		printk("Yellow task: %lld\n", timing_ns);
 
 		k_condvar_signal(&dispatcher_signal);
 	}
@@ -356,15 +416,29 @@ void green_led_task(void *, void *, void*) {
 	printk("Green led thread started\n");
 	while (true) {
 		k_condvar_wait(&green_signal, &green_mutex, K_FOREVER);
+
+		timing_start();
+		timing_t green_start_time = timing_counter_get();
+
 		gpio_pin_set_dt(&green,1);
-		printk("Green on\n");
+		
+		#ifdef DEBUG
+			printk("Green on\n");
+		#endif
 		// 2. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
 		// 3. set led off
 		gpio_pin_set_dt(&green,0);
-		printk("Green off\n");
+		#ifdef DEBUG
+			printk("Green off\n");
+		#endif
 		// 4. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
+
+		timing_t green_end_time = timing_counter_get();
+		timing_stop();
+		uint64_t timing_ns = timing_cycles_to_ns(timing_cycles_get(&green_start_time, &green_end_time));
+		printk("Green task: %lld\n", timing_ns);
 		
 		k_condvar_signal(&dispatcher_signal);
 		
