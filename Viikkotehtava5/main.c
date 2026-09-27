@@ -1,5 +1,5 @@
 /*
-Viikkotehtävä 4. RTOS-ohjelman debuggaus
+Viikkotehtävä 5. Liikennevalojen yksikkötestaus
 Tekijä: Maria Korvenpää
 Arvosanatavoite tehtävälle: 1p/4p
 */
