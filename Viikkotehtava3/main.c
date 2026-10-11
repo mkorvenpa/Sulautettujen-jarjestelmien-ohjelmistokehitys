@@ -1,7 +1,12 @@
 /*
 Viikkotehtävä 3. RTOS-ohjelmointi (osa 2)
 Tekijä: Maria Korvenpää
-Arvosanatavoite tehtävälle: 1p/4p
+Arvosanatavoite tehtävälle: 4/4p
+
+- ajastus lisätty, jos aikaa ei anneta, käytetään oletuksena 1000ms
+- lisätty T-komento, joka toistaa viimeisen komennon
+- Tread API ja signaalit ohjaavat taskien suoritusta
+
 */
 
 
@@ -71,6 +76,9 @@ K_THREAD_DEFINE(green_thread,STACKSIZE,green_led_task,NULL,NULL,NULL,PRIORITY,0,
 K_THREAD_DEFINE(dis_thread,STACKSIZE,dispatcher_task,NULL,NULL,NULL,PRIORITY,0,0);
 K_THREAD_DEFINE(uart_thread,STACKSIZE,uart_task,NULL,NULL,NULL,PRIORITY,0,0);
 
+int time=1000;
+char last_color;
+int last_time;
 
 // Create dispatcher FIFO buffer
 K_FIFO_DEFINE(dispatcher_fifo);
@@ -154,7 +162,7 @@ void uart_task(void *unused1, void *unused2, void *unused3)
 	while (true) {
 		// Ask UART if data available
 		if (uart_poll_in(uart_dev,&rc) == 0) {
-			// printk("Received: %c\n",rc);
+			printk("Received: %c\n",rc);
 			// If character is not newline, add to UART message buffer
 			if (rc != '\r') {
 				uart_msg[uart_msg_cnt] = rc;
@@ -202,34 +210,38 @@ void dispatcher_task(void *unused1, void *unused2, void *unused3)
 
 		printk("Dispatcher: %s\n", sequence);
 
-		int cnt = 0;
-
-		while (sequence[cnt] != 0) {
-			if(sequence[cnt] == 'R') {
-				printk("RED\n");
-				k_condvar_signal(&red_signal);
-			} else if(sequence[cnt] == 'G') {
-				printk("GREEN\n");
-				k_condvar_signal(&green_signal);
-			} else if(sequence[cnt] == 'Y') {
-				printk("YELLOW\n");
-				k_condvar_signal(&yellow_signal);
-			} else {
-				printk("Dispatcher: Invalid color %c\n", sequence[cnt]);
-			}
-			cnt++;
-
-			k_condvar_wait(&dispatcher_signal, &dispatcher_mutex, K_FOREVER);
-
+		char color = sequence[0];
+        time = atoi(sequence+2);
+		//default time if invalid
+		if (time <= 0) {
+			time = 1000;
 		}
-        // You need to:
-        // Parse color and time from the fifo data
-        // Example
-        //    char color = sequence[0];
-        //    int time = atoi(sequence+2);
-		//    printk("Data: %c %d\n", color, time);
-        // Send the parsed color information to tasks using fifo
-        // Use release signal to control sequence or k_yield
+		printk("Data: %c %d\n", color, time);
+
+		if (color == 'T') {
+			color = last_color;
+			time = last_time;
+		}
+
+		if(color == 'R') {
+			printk("RED\n");
+			k_condvar_signal(&red_signal);
+		} else if(color == 'G') {
+			printk("GREEN\n");
+			k_condvar_signal(&green_signal);
+		} else if(color == 'Y') {
+			printk("YELLOW\n");
+			k_condvar_signal(&yellow_signal);
+		} else {
+			printk("Dispatcher: Invalid color %c\n", color);
+		}
+
+		last_color = color;
+		last_time = time;
+		printk("Dispatcher: last_color %c last_time %d\n", last_color, last_time);
+		
+		k_condvar_wait(&dispatcher_signal, &dispatcher_mutex, K_FOREVER);
+
 	}
 }
 
@@ -241,7 +253,7 @@ void button_0_handler(const struct device *dev, struct gpio_callback *cb, uint32
 					return;
 				}
 				// Copy UART message to dispatcher data
-				snprintf(buf->msg, 20, "%s", "RYG");
+				snprintf(buf->msg, 20, "%s", "R,1000");
 
 				// You need to:
 				// Put dispatcher data to FIFO buffer
@@ -255,7 +267,7 @@ void button_1_handler(const struct device *dev, struct gpio_callback *cb, uint32
 					return;
 				}
 				// Copy UART message to dispatcher data
-				snprintf(buf->msg, 20, "%s", "R");
+				snprintf(buf->msg, 20, "%s", "R,500");
 
 				// You need to:
 				// Put dispatcher data to FIFO buffer
@@ -270,7 +282,7 @@ void button_2_handler(const struct device *dev, struct gpio_callback *cb, uint32
 					return;
 				}
 				// Copy UART message to dispatcher data
-				snprintf(buf->msg, 20, "%s", "Y");
+				snprintf(buf->msg, 20, "%s", "Y,1000");
 
 				// You need to:
 				// Put dispatcher data to FIFO buffer
@@ -284,7 +296,7 @@ void button_3_handler(const struct device *dev, struct gpio_callback *cb, uint32
 					return;
 				}
 				// Copy UART message to dispatcher data
-				snprintf(buf->msg, 20, "%s", "G");
+				snprintf(buf->msg, 20, "%s", "G,1000");
 
 				// You need to:
 				// Put dispatcher data to FIFO buffer
@@ -298,13 +310,12 @@ void button_4_handler(const struct device *dev, struct gpio_callback *cb, uint32
 					return;
 				}
 				// Copy UART message to dispatcher data
-				snprintf(buf->msg, 20, "%s", "GYR");
+				snprintf(buf->msg, 20, "%s", "T");
 
 				// You need to:
 				// Put dispatcher data to FIFO buffer
 				k_fifo_put(&dispatcher_fifo, buf);
 }
-
 
 // Task to handle red led
 void red_led_task(void *, void *, void*) {
@@ -315,13 +326,10 @@ void red_led_task(void *, void *, void*) {
 
 		gpio_pin_set_dt(&red,1);
 		printk("Red on\n");
-		// 2. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-		// 3. set led off
+		k_msleep(time);
 		gpio_pin_set_dt(&red,0);
 		printk("Red off\n");
-		// 4. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
+		k_msleep(time);
 
 		k_condvar_signal(&dispatcher_signal);
 		
@@ -334,18 +342,14 @@ void yellow_led_task(void *, void *, void*) {
 	while (true) {
 		k_condvar_wait(&yellow_signal, &yellow_mutex, K_FOREVER);
 
-		// 1. set led on 
 		gpio_pin_set_dt(&red,1);
 		gpio_pin_set_dt(&green,1);
 		printk("Yellow on\n");
-		// 2. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-		// 3. set led off
+		k_msleep(time);
 		gpio_pin_set_dt(&red,0);
 		gpio_pin_set_dt(&green,0);
 		printk("Yellow off\n");
-		// 4. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
+		k_msleep(time);
 
 		k_condvar_signal(&dispatcher_signal);
 	}
@@ -358,14 +362,11 @@ void green_led_task(void *, void *, void*) {
 		k_condvar_wait(&green_signal, &green_mutex, K_FOREVER);
 		gpio_pin_set_dt(&green,1);
 		printk("Green on\n");
-		// 2. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-		// 3. set led off
+		k_msleep(time);
 		gpio_pin_set_dt(&green,0);
 		printk("Green off\n");
-		// 4. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-		
+		k_msleep(time);
+
 		k_condvar_signal(&dispatcher_signal);
 		
 	}
